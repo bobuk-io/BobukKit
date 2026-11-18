@@ -20,7 +20,7 @@ Shared macOS components for bobuk-io apps. Canonical checkout:
   pre-spaced string. Hints do not register keyboard handlers. All commands remain
   in the application's responder chain. Group identity is the unique key/action pair.
 - `PickerSelection`: non-wrapping, clamped movement. Optional selection lets the
-  first Up return to typed input, as in Lowkey; Ting keeps the first result selected.
+  first Up return to typed input, as in lowkey; Ting keeps the first result selected.
 
 Applications provide `PickerPalette` at the current window's theme boundary.
 Palette roles are surface, text, secondary text, accent, frame border and badge ink.
@@ -44,7 +44,7 @@ Scripts/test_sync.sh            # offline sync safety tests
 ```
 
 `consumers.txt` paths are relative to this checkout. Consumers are Ting
-(launcha, selecta and Clipbawd), Lowkey (address/alias picker), Splash Finish
+(launcha, selecta and Clipbawd), lowkey (address/alias picker), Splash Finish
 (panel frame and shortcut footer) and HAScS (localized shortcut footer).
 Splash Finish retains its variable-height notification cards and separate link/dismiss
 actions; HAScS retains its scene tiles and grid navigation. Ahti is not a consumer.
