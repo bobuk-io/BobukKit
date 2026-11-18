@@ -1,7 +1,7 @@
 # BobukKit
 
 Shared macOS components for bobuk-io apps. Canonical checkout:
-`~/GitHub/bobuk-io/BobukKit`. Requires macOS 14 and Swift 6.2.
+`~/GitHub/bobuk.io/BobukKit`. Requires macOS 14 and Swift 6.2.
 
 ## BobukUI
 
