@@ -1,5 +1,8 @@
 # BobukKit
 
+The name is a Ukrainian pun: **Бобук Кіт** — “Bobuk the Cat”. Bobuk is the
+author's name, and Ukrainian **кіт** means “cat”. A toolkit with a cat in its name. :)
+
 Shared macOS components for bobuk-io apps. Canonical checkout:
 `~/GitHub/bobuk.io/BobukKit`. Requires macOS 14 and Swift 6.2.
 
@@ -40,15 +43,19 @@ swift run BobukUIGallery /tmp/bobukkit-gallery
 Scripts/test_sync.sh            # offline sync safety tests
 ```
 
-`consumers.txt` paths are relative to this checkout. The initial consumers are Ting
-(launcha, selecta and Clipbawd) and Lowkey (address/alias picker). Snapshot files are
+`consumers.txt` paths are relative to this checkout. Consumers are Ting
+(launcha, selecta and Clipbawd), Lowkey (address/alias picker), Splash Finish
+(panel frame and shortcut footer) and HAScS (localized shortcut footer).
+Splash Finish retains its variable-height notification cards and separate link/dismiss
+actions; HAScS retains its scene tiles and grid navigation. Ahti is not a consumer.
+Snapshot files are
 listed in `MANIFEST.sha256`; `.bobukkit-vendor` marks ownership. Sync refuses an
 unmarked nonempty directory or a symlink rather than deleting app-owned files.
 Only the marked `Vendor/BobukKit` subtree is managed. Cached `.build`/`.swiftpm`
 folders are preserved and excluded from drift comparison. The gallery and tests
 travel with the snapshot, but synchronization scripts remain canonical.
 `Vendor/BobukKit/Scripts/check-vendor.sh` verifies snapshot hashes and runs its
-unit tests without an upstream checkout. Both apps run it as a release EXTRA_TESTS
+unit tests without an upstream checkout. All consumer apps run it as a release EXTRA_TESTS
 suite; its independent scratch directory avoids app build/test contention.
 
 Before changing a component: edit here, run the relevant kit tests and gallery,
