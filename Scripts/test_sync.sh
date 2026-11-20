@@ -21,4 +21,21 @@ if "$ROOT/Scripts/sync.sh" "$APP" >/dev/null 2>&1; then echo 'Overwrote unmarked
 rm -rf "$APP/Vendor/BobukKit"
 ln -s "$TMP" "$APP/Vendor/BobukKit"
 if "$ROOT/Scripts/sync.sh" "$APP" >/dev/null 2>&1; then echo 'Followed symlink' >&2; exit 1; fi
+# The release kit: copied with a marker, drift and stray files are found, app files are kept.
+REL="$TMP/release app"
+mkdir -p "$REL/Scripts/release"
+printf '// fixture\n' > "$REL/Package.swift"
+printf 'APP_NAME=Demo\nBUNDLE_ID=io.bobuk.demo\n' > "$REL/release.env"
+printf 'app owned\n' > "$REL/Scripts/check_bundle.swift"
+printf 'stale\n' > "$REL/Scripts/release/sync_kit.sh"
+"$ROOT/Scripts/sync.sh" "$REL" >/dev/null
+[[ -f "$REL/Scripts/release/.bobukkit-release" && -x "$REL/Scripts/release_next.sh" && -f "$REL/Scripts/release/next.sh" ]]
+[[ ! -e "$REL/Scripts/release/sync_kit.sh" ]] || { echo 'Kept a file the kit no longer has' >&2; exit 1; }
+[[ "$(cat "$REL/Scripts/check_bundle.swift")" == 'app owned' && -x "$REL/Scripts/package_app.sh" ]] || { echo 'Touched an app file' >&2; exit 1; }
+"$ROOT/Scripts/sync.sh" --check "$REL" >/dev/null
+printf '# drift\n' >> "$REL/Scripts/release/common.sh"
+if "$ROOT/Scripts/sync.sh" --check "$REL" >/dev/null 2>&1; then echo 'Missed release kit drift' >&2; exit 1; fi
+"$ROOT/Scripts/sync.sh" "$REL" >/dev/null
+printf 'x\n' >> "$REL/Scripts/release.sh"
+if "$ROOT/Scripts/sync.sh" --check "$REL" >/dev/null 2>&1; then echo 'Missed entry point drift' >&2; exit 1; fi
 printf 'SYNC_TESTS_PASSED\n'
