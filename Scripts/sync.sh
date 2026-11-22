@@ -14,7 +14,7 @@ CHECK=false
 if [[ ${1:-} == --check ]]; then CHECK=true; shift; fi
 SNAPSHOT=$(mktemp -d "${TMPDIR:-/tmp}/bobukkit-sync.XXXXXX")
 trap 'rm -rf "$SNAPSHOT"' EXIT
-for file in Package.swift LICENSE README.md AGENTS.md VERSION; do cp "$ROOT/$file" "$SNAPSHOT/"; done
+for file in Package.swift LICENSE README.md AGENTS.md COOKBOOK.md VERSION; do cp "$ROOT/$file" "$SNAPSHOT/"; done
 for folder in Sources Tests Examples; do cp -R "$ROOT/$folder" "$SNAPSHOT/"; done
 mkdir "$SNAPSHOT/Scripts"
 cp "$ROOT/Scripts/check-vendor.sh" "$SNAPSHOT/Scripts/"
