@@ -15,6 +15,9 @@ public enum ACPAccessPolicy: Equatable, Sendable {
     /// Pure text chat: advertises no filesystem/terminal capabilities, cancels permission requests,
     /// and disconnects if the agent executes a tool call.
     case textOnly
+    /// Built-in agent tools (such as web search) are permitted without exposing host filesystem
+    /// capabilities (`fs.readTextFile` / `fs.writeTextFile`).
+    case tools(autoApproveTools: Bool = true)
     /// Workspace-enabled agent: opens the session in `ACPLaunchConfiguration.directory`,
     /// advertises `fs.readTextFile` (and `fs.writeTextFile` when `allowWrite` is true) scoped to
     /// `ACPLaunchConfiguration.directory` plus `additionalRoots`, permits tool call updates, and
@@ -321,7 +324,7 @@ public actor ACPClient {
 
     private func clientCapabilities() -> Object {
         switch launch.access {
-        case .textOnly:
+        case .textOnly, .tools:
             return [:]
         case let .workspace(allowWrite, _, _):
             return ["fs": ["readTextFile": true, "writeTextFile": allowWrite]]
@@ -330,7 +333,7 @@ public actor ACPClient {
 
     private func allowedRoots() -> [String] {
         switch launch.access {
-        case .textOnly:
+        case .textOnly, .tools:
             return []
         case let .workspace(_, _, additionalRoots):
             return ([launch.directory] + additionalRoots).map(Self.canonicalPath)
@@ -372,7 +375,12 @@ public actor ACPClient {
                 try send(["id": id, "result": ["outcome": ["outcome": "cancelled"]]])
                 return
             }
-            if case let .workspace(_, autoApproveTools, _) = launch.access, autoApproveTools,
+            let autoApprove: Bool = switch launch.access {
+            case .textOnly: false
+            case let .tools(approve): approve
+            case let .workspace(_, approve, _): approve
+            }
+            if autoApprove,
                let options = params?["options"] as? [Object] {
                 let allowOption = options.first(where: { $0["kind"] as? String == "allow_once" })
                     ?? options.first(where: { ($0["kind"] as? String)?.hasPrefix("allow") == true })
@@ -571,14 +579,17 @@ public actor ACPClient {
                 }
             case "tool_call", "tool_call_update":
                 let status = update["status"] as? String
+                let toolTitle = (update["title"] as? String) ?? (update["name"] as? String)
                 if launch.access == .textOnly {
                     if let status, ["in_progress", "completed"].contains(status) {
+                        if let toolTitle, !toolTitle.isEmpty {
+                            await toolStatuses?(toolTitle)
+                        }
                         disconnect(.unexpectedTool)
                     }
                 } else {
                     if status == "in_progress" || status == "pending" {
-                        let title = (update["title"] as? String) ?? (update["name"] as? String) ?? "Running tool…"
-                        await toolStatuses?(title)
+                        await toolStatuses?(toolTitle ?? "Running tool…")
                     } else if status == "completed" || status == "failed" || status == "cancelled" {
                         await toolStatuses?(nil)
                     }
