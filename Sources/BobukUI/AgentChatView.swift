@@ -918,7 +918,11 @@ public struct AgentChatView: View {
             guard win.isVisible else { return }
             if !force, win.firstResponder is NSTextView { return }
         }
-        composerFocused = true
+        // Reset first when @FocusState is already true while AppKit's firstResponder moved elsewhere
+        // (e.g. after orderOut / makeKeyAndOrderFront), otherwise setting `true` again is a no-op.
+        if composerFocused {
+            composerFocused = false
+        }
         DispatchQueue.main.async {
             if let win = hostWindow.window {
                 guard win.isVisible else { return }
