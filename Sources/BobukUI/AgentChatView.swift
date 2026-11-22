@@ -652,13 +652,12 @@ public struct AgentChatView: View {
             }
 
             if streaming {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(colors.accent)
-                        .frame(width: 6, height: 6)
-                    MonoLabel(streamingStatus)
-                        .foregroundStyle(colors.muted)
-                }
+                StreamingStatusView(
+                    text: streamingStatus,
+                    accent: colors.accent,
+                    ink: colors.ink,
+                    muted: colors.muted
+                )
                 .padding(.top, 2)
             } else if copiedMessageID == message.id {
                 copiedPill
@@ -1073,6 +1072,70 @@ public struct AgentChatView: View {
             .keyboardShortcut(.return, modifiers: .command)
             .disabled(!session.canSend)
             .accessibilityLabel("Send message")
+        }
+    }
+}
+
+/// Subtle shimmer sweep across the streaming status label with a gently pulsing accent dot.
+private struct StreamingStatusView: View {
+    let text: String
+    let accent: Color
+    let ink: Color
+    let muted: Color
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private static let cycleSeconds: TimeInterval = 1.7
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: reduceMotion)) { context in
+            let raw = reduceMotion ? 0.5 : context.date.timeIntervalSinceReferenceDate
+                .truncatingRemainder(dividingBy: Self.cycleSeconds) / Self.cycleSeconds
+            let cycle = raw < 0 ? raw + 1 : raw
+            let sweep = -0.35 + cycle * 1.70
+            let pulse = 0.5 - 0.5 * cos(cycle * 2.0 * .pi)
+
+            HStack(spacing: 6) {
+                ZStack {
+                    if !reduceMotion {
+                        Circle()
+                            .fill(accent.opacity(0.32 * (1.0 - cycle)))
+                            .frame(width: 6, height: 6)
+                            .scaleEffect(1.0 + cycle * 1.35)
+                    }
+                    Circle()
+                        .fill(accent.opacity(reduceMotion ? 1.0 : 0.55 + 0.45 * pulse))
+                        .frame(width: 6, height: 6)
+                }
+                .frame(width: 10, height: 10)
+                .accessibilityHidden(true)
+
+                MonoLabel(text)
+                    .foregroundStyle(muted.opacity(0.75))
+                    .overlay {
+                        if !reduceMotion {
+                            GeometryReader { proxy in
+                                let width = max(proxy.size.width, 1)
+                                let band = max(width * 0.36, 44)
+                                LinearGradient(
+                                    stops: [
+                                        .init(color: .clear, location: 0.0),
+                                        .init(color: accent.opacity(0.75), location: 0.35),
+                                        .init(color: ink, location: 0.5),
+                                        .init(color: accent.opacity(0.75), location: 0.65),
+                                        .init(color: .clear, location: 1.0),
+                                    ],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                                .frame(width: band, height: proxy.size.height)
+                                .offset(x: sweep * width - band * 0.5)
+                            }
+                            .clipped()
+                            .mask(MonoLabel(text))
+                            .allowsHitTesting(false)
+                        }
+                    }
+            }
         }
     }
 }
