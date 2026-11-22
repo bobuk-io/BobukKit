@@ -21,6 +21,7 @@ import SwiftUI
 
     public private(set) var phase = Phase.disconnected
     public private(set) var models: ACPModels?
+    public private(set) var efforts: ACPModels?
     public private(set) var messages: [Message] = []
     public private(set) var lastReply: String?
     public private(set) var activeTool: String?
@@ -106,15 +107,20 @@ import SwiftUI
             self.client = client
             Task {
                 do {
-                    var models = try await client.connect { [weak self] models in await self?.update(models, serial: serial) }
+                    var models = try await client.connect(
+                        onModels: { [weak self] models in await self?.update(models, serial: serial) },
+                        onEfforts: { [weak self] efforts in await self?.updateEfforts(efforts, serial: serial) }
+                    )
                     if let initialModel, !initialModel.isEmpty {
                         models = try await client.selectModel(initialModel)
                     }
                     if let initialEffort, !initialEffort.isEmpty {
                         _ = try await client.selectEffort(initialEffort)
                     }
+                    let efforts = await client.effortOptions()
                     guard serial == generation else { return }
                     self.models = models
+                    self.efforts = efforts
                     phase = .ready
                     rescheduleIdleTimer()
                 } catch { await failed(error, serial: serial) }
@@ -140,8 +146,28 @@ import SwiftUI
         Task {
             do {
                 let models = try await client.selectModel(id)
+                let efforts = await client.effortOptions()
                 guard serial == generation else { return }
                 self.models = models
+                self.efforts = efforts
+                phase = .ready
+                rescheduleIdleTimer()
+            } catch { await failed(error, serial: serial) }
+        }
+    }
+
+    public func selectEffort(_ id: String) {
+        guard phase == .ready, let client, id != efforts?.current else { return }
+        cancelIdleTimer()
+        let serial = generation
+        phase = .switching
+        error = nil
+        Task {
+            do {
+                _ = try await client.selectEffort(id)
+                let efforts = await client.effortOptions()
+                guard serial == generation else { return }
+                self.efforts = efforts
                 phase = .ready
                 rescheduleIdleTimer()
             } catch { await failed(error, serial: serial) }
@@ -362,6 +388,7 @@ import SwiftUI
         let old = client
         client = nil
         models = nil
+        efforts = nil
         phase = .disconnected
         disconnectedForInactivity = false
         declinedToolsInSession = false
@@ -396,6 +423,7 @@ import SwiftUI
         let idleClient = client
         client = nil
         models = nil
+        efforts = nil
         phase = .disconnected
         activeTool = nil
         disconnectedForInactivity = true
@@ -409,6 +437,10 @@ import SwiftUI
 
     private func update(_ models: ACPModels?, serial: Int) {
         if serial == generation { self.models = models }
+    }
+
+    private func updateEfforts(_ efforts: ACPModels?, serial: Int) {
+        if serial == generation { self.efforts = efforts }
     }
 
     private func append(_ chunk: String, to id: UUID, serial: Int) {
@@ -449,6 +481,7 @@ import SwiftUI
         let failedClient = client
         client = nil
         models = nil
+        efforts = nil
         phase = .disconnected
         disconnectedForInactivity = false
         activeTool = nil
@@ -517,6 +550,8 @@ public struct AgentChatView: View {
     @Bindable private var session: AgentChatSession
     @FocusState private var composerFocused: Bool
     @State private var copiedMessageID: UUID?
+    @State private var hoveredMessageID: UUID?
+    @State private var autoScrollPinned = true
     @State private var agentStatuses: [ACPAgentStatus] = []
     @State private var installingAdapterForID: String?
     @State private var adapterInstallError: String?
@@ -751,7 +786,7 @@ public struct AgentChatView: View {
 
     private var transcript: some View {
         ScrollViewReader { reader in
-            ScrollView {
+            let scroll = ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     ForEach(session.messages) { message in
                         if message.isUser {
@@ -767,8 +802,27 @@ public struct AgentChatView: View {
                 .padding(.bottom, 12)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             }
+            .onChange(of: session.messages.count) { oldCount, newCount in
+                if newCount > oldCount {
+                    autoScrollPinned = true
+                    reader.scrollTo("chat-end", anchor: .bottom)
+                }
+            }
             .onChange(of: session.messages.last?.text) { _, _ in
-                reader.scrollTo("chat-end", anchor: .bottom)
+                if autoScrollPinned {
+                    reader.scrollTo("chat-end", anchor: .bottom)
+                }
+            }
+
+            if #available(macOS 15.0, *) {
+                scroll.onScrollGeometryChange(for: Bool.self) { geo in
+                    let distanceFromBottom = geo.contentSize.height - (geo.contentOffset.y + geo.visibleRect.height)
+                    return distanceFromBottom <= 48
+                } action: { _, nearBottom in
+                    autoScrollPinned = nearBottom
+                }
+            } else {
+                scroll
             }
         }
     }
@@ -806,9 +860,15 @@ public struct AgentChatView: View {
 
                 if copiedMessageID == message.id {
                     copiedPill
+                } else if hoveredMessageID == message.id {
+                    hoverCopyButton(message)
                 }
             }
             Spacer(minLength: 36)
+        }
+        .onHover { hovering in
+            if hovering { hoveredMessageID = message.id }
+            else if hoveredMessageID == message.id { hoveredMessageID = nil }
         }
     }
 
@@ -840,16 +900,38 @@ public struct AgentChatView: View {
                 .padding(.top, 2)
             } else if copiedMessageID == message.id {
                 copiedPill
+            } else if hoveredMessageID == message.id, !message.text.isEmpty {
+                hoverCopyButton(message)
             }
         }
         .padding(.leading, 2)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
+        .onHover { hovering in
+            if hovering { hoveredMessageID = message.id }
+            else if hoveredMessageID == message.id { hoveredMessageID = nil }
+        }
         .onTapGesture(count: 2) { copyRawMarkdown(message) }
         .contextMenu {
             Button("Copy Markdown") { copyRawMarkdown(message) }
         }
         .help("Double-click to copy raw Markdown")
+    }
+
+    private func hoverCopyButton(_ message: AgentChatSession.Message) -> some View {
+        Button { copyRawMarkdown(message) } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "doc.on.doc")
+                    .font(.system(size: 9.5))
+                Text("Copy Markdown")
+                    .font(.system(size: 10.5, weight: .medium))
+            }
+            .foregroundStyle(colors.muted)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(colors.elevated, in: Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     private var copiedPill: some View {
@@ -1131,6 +1213,19 @@ public struct AgentChatView: View {
                         }
                     }
                 }
+                if isConnected, let efforts = session.efforts, !efforts.choices.isEmpty {
+                    Section("Effort") {
+                        ForEach(efforts.choices) { choice in
+                            Button { session.selectEffort(choice.id) } label: {
+                                if choice.id == efforts.current {
+                                    Label(choice.name, systemImage: "checkmark")
+                                } else {
+                                    Text(choice.name)
+                                }
+                            }
+                        }
+                    }
+                }
                 if isConnected {
                     Divider()
                     Button("Disconnect", role: .destructive) { session.disconnect() }
@@ -1213,13 +1308,22 @@ public struct AgentChatView: View {
         return models.current.isEmpty ? nil : models.current
     }
 
+    private var currentEffortName: String? {
+        guard let efforts = session.efforts else { return nil }
+        if let found = efforts.choices.first(where: { $0.id == efforts.current }) { return found.name }
+        return efforts.current.isEmpty ? nil : efforts.current
+    }
+
     private var pillSubtitle: String? {
         switch session.phase {
         case .disconnected: return session.disconnectedForInactivity ? "Idle" : nil
         case .connecting: return "Connecting…"
         case .switching: return "Switching…"
         case .ready, .replying, .stopping:
-            if let name = currentModelName { return name }
+            if let name = currentModelName {
+                if let effort = currentEffortName { return "\(name) · \(effort)" }
+                return name
+            }
             return session.needsModelCatalog ? "No model" : "CLI default"
         }
     }

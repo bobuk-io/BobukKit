@@ -125,6 +125,39 @@ import Testing
         await #expect(throws: ACPError.unexpectedTool) { _ = try await agent.prompt("A prompt") { _ in } }
     }
 
+    @Test func sendsLargePromptBeyondPipeBufferWithoutEAGAINFailure() async throws {
+        let dir = try TemporaryDirectory(prefix: "acp-large-prompt")
+        defer { dir.remove() }
+        let script = #"""
+        set -eu
+        IFS= read -r line
+        printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
+        IFS= read -r line
+        printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"big"}}'
+        IFS= read -r line
+        bytes=${#line}
+        printf '%s\n' "{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{\"sessionId\":\"big\",\"update\":{\"sessionUpdate\":\"agent_message_chunk\",\"content\":{\"type\":\"text\",\"text\":\"$bytes\"}}}}"
+        printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
+        IFS= read -r line || true
+        """#
+        let agent = ACPClient(launch: ACPLaunchConfiguration(
+            executable: URL(fileURLWithPath: "/bin/bash"),
+            arguments: ["-c", script],
+            directory: dir.url,
+            environment: ["PATH": "/usr/bin:/bin"],
+            clientName: "fixture",
+            isolation: .unrestricted
+        ), requestTimeout: .seconds(3), turnTimeout: .seconds(3))
+        _ = try await agent.connect()
+        let largePrompt = String(repeating: "a", count: 28_000)
+        let transcript = Transcript()
+        let reason = try await agent.prompt(largePrompt) { await transcript.append($0) }
+        #expect(reason == "end_turn")
+        let receivedBytes = Int(await transcript.text) ?? 0
+        #expect(receivedBytes > 28_000)
+        await agent.close()
+    }
+
     @Test func allowsToolsWithoutFilesystemAccess() async throws {
         let dir = try TemporaryDirectory(prefix: "acp-tools-only")
         defer { dir.remove() }

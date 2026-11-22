@@ -820,36 +820,40 @@ public struct ACPAgentPreset: Codable, Equatable, Hashable, Identifiable, Sendab
             requestTimeout: options.requestTimeout,
             turnTimeout: options.turnTimeout
         )
-        defer { Task { await client.close() } }
 
-        var activeModels = try await client.connect()
-        if let model = options.model, !model.isEmpty {
-            activeModels = try await client.selectModel(model)
-        }
-        var activeEffort = await client.currentEffort()
-        if let effort = options.effort, !effort.isEmpty {
-            if let updated = try await client.selectEffort(effort) {
-                activeEffort = updated
+        do {
+            var activeModels = try await client.connect()
+            if let model = options.model, !model.isEmpty {
+                activeModels = try await client.selectModel(model)
             }
-        }
+            var activeEffort = await client.currentEffort()
+            if let effort = options.effort, !effort.isEmpty {
+                if let updated = try await client.selectEffort(effort) {
+                    activeEffort = updated
+                }
+            }
 
-        actor Collector {
-            var text = ""
-            func append(_ chunk: String) { text += chunk }
+            actor Collector {
+                var text = ""
+                func append(_ chunk: String) { text += chunk }
+            }
+            let collector = Collector()
+            let reason = try await client.prompt(prompt, onTool: onTool) { chunk in
+                await collector.append(chunk)
+                await onChunk?(chunk)
+            }
+            let reply = await collector.text
+            await client.close()
+            return ACPPromptResponse(
+                text: reply,
+                stopReason: reason,
+                model: activeModels?.current,
+                effort: activeEffort
+            )
+        } catch {
+            await client.close()
+            throw error
         }
-        let collector = Collector()
-        let reason = try await client.prompt(prompt, onTool: onTool) { chunk in
-            await collector.append(chunk)
-            await onChunk?(chunk)
-        }
-        let reply = await collector.text
-        await client.close()
-        return ACPPromptResponse(
-            text: reply,
-            stopReason: reason,
-            model: activeModels?.current,
-            effort: activeEffort
-        )
     }
 
     /// Convenience one-shot call using the first auto-detected installed agent.
