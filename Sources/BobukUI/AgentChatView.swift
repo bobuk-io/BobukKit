@@ -30,6 +30,9 @@ import SwiftUI
     private var client: ACPClient?
     @ObservationIgnored private var replyTask: Task<Void, Never>?
     @ObservationIgnored private var idleTask: Task<Void, Never>?
+    @ObservationIgnored private var flushTask: Task<Void, Never>?
+    @ObservationIgnored private var pendingChunks = ""
+    @ObservationIgnored private var pendingReplyID: UUID?
     private var generation = 0
     private let makeClient: () throws -> ACPClient
     private let preparePrompt: (String) -> String
@@ -152,6 +155,7 @@ import SwiftUI
                     await self?.append(chunk, to: replyID, serial: serial)
                 })
                 guard serial == generation else { return }
+                flushChunks(serial: serial)
                 activeTool = nil
                 let reply = messages.last?.text ?? ""
                 if phase != .stopping {
@@ -167,12 +171,14 @@ import SwiftUI
                 rescheduleIdleTimer()
             } catch is CancellationError {
                 guard serial == generation else { return }
+                flushChunks(serial: serial)
                 activeTool = nil
                 discardEmptyReply()
                 phase = .ready
                 rescheduleIdleTimer()
             } catch {
                 if serial == generation {
+                    flushChunks(serial: serial)
                     activeTool = nil
                     discardEmptyReply()
                 }
@@ -216,6 +222,10 @@ import SwiftUI
         cancelIdleTimer()
         replyTask?.cancel()
         replyTask = nil
+        flushTask?.cancel()
+        flushTask = nil
+        pendingChunks.removeAll(keepingCapacity: false)
+        pendingReplyID = nil
         let old = client
         client = nil
         models = nil
@@ -268,7 +278,30 @@ import SwiftUI
 
     private func append(_ chunk: String, to id: UUID, serial: Int) {
         guard serial == generation, phase == .replying, messages.last?.id == id else { return }
-        messages[messages.count - 1].text += chunk
+        pendingChunks += chunk
+        pendingReplyID = id
+        guard flushTask == nil else { return }
+        flushTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(33))
+            self?.flushChunks(serial: serial)
+        }
+    }
+
+    private func flushChunks(serial: Int) {
+        flushTask?.cancel()
+        flushTask = nil
+        guard serial == generation, !pendingChunks.isEmpty else {
+            pendingChunks.removeAll(keepingCapacity: true)
+            pendingReplyID = nil
+            return
+        }
+        let delta = pendingChunks
+        let id = pendingReplyID
+        pendingChunks.removeAll(keepingCapacity: true)
+        pendingReplyID = nil
+        if messages.last?.id == id {
+            messages[messages.count - 1].text += delta
+        }
     }
 
     private func discardEmptyReply() {
@@ -419,7 +452,7 @@ public struct AgentChatView: View {
     private var activeError: String? { session.error ?? (session.phase == .ready ? session.modelProblem : nil) }
 
     private var resolvedAgentStatuses: [ACPAgentStatus] {
-        agentStatuses.isEmpty && !agents.isEmpty ? ACPAgentPreset.detectAll(in: agents) : agentStatuses
+        agentStatuses
     }
 
     private var selectedAgentMissingAdapter: ACPAgentPreset? {
@@ -432,7 +465,13 @@ public struct AgentChatView: View {
 
     private func refreshAgentStatuses() {
         guard !agents.isEmpty else { return }
-        agentStatuses = ACPAgentPreset.detectAll(in: agents)
+        let presets = agents
+        Task {
+            let detected = await Task.detached(priority: .utility) {
+                ACPAgentPreset.detectAll(in: presets)
+            }.value
+            agentStatuses = detected
+        }
     }
 
     private func installAdapter(for preset: ACPAgentPreset) {
@@ -574,7 +613,7 @@ public struct AgentChatView: View {
     private var transcript: some View {
         ScrollViewReader { reader in
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                LazyVStack(alignment: .leading, spacing: 18) {
                     ForEach(session.messages) { message in
                         if message.isUser {
                             userTurn(message)
@@ -649,6 +688,7 @@ public struct AgentChatView: View {
                     elevated: colors.elevated,
                     line: colors.line
                 )
+                .equatable()
             }
 
             if streaming {
