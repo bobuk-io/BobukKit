@@ -623,7 +623,7 @@ let quick = try await ACPAgentPreset.ask(
 )
 ```
 
-For UI sessions (`AgentChatSession`), pass `initialModel:` and `initialEffort:` to pre-select them automatically on connect.
+For UI sessions (`AgentChatSession`), pass `initialModel:` and `initialEffort:` to pre-select them automatically on connect, and `idleTimeout:` (e.g. `.seconds(15 * 60)`) to automatically terminate an idle agent subprocess after inactivity while keeping the visible transcript and draft intact (`disconnectedForInactivity` becomes `true`, and `noteActivity()` resets the timer).
 
 ### Rules & security boundary
 
