@@ -1,4 +1,4 @@
-import BobukUI
+import BobukCore
 import Foundation
 import Testing
 
